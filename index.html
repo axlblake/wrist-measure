@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hand Measurement Wizard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    #app {
+      width: 800px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      padding: 20px 40px;
+    }
+    h2 { text-align: center; margin-bottom: 20px; }
+    .step { display: none; }
+    .active { display: block; }
+    .nav {
+      text-align: center;
+      margin-top: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button.primary { background: #007bff; color: white; }
+    button.secondary { background: #6c757d; color: white; }
+    canvas { border: 1px solid #ccc; margin-top: 10px; }
+    pre {
+      background: #f1f1f1;
+      padding: 10px;
+      border-radius: 5px;
+      overflow-x: auto;
+      max-height: 300px;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <h2>Hand Measurement Wizard</h2>
+
+  <!-- Step 1 -->
+  <div class="step active" id="step1">
+    <p>Welcome! This wizard will measure your hand and fingers for parametric modeling.</p>
+    <ol>
+      <li>Place your <b>hand flat</b> in front of the camera (palm up or down).</li>
+      <li>Ensure a <b>reference object</b> (like a credit card) is visible in the same frame.</li>
+      <li>Good lighting and flat angle will improve accuracy.</li>
+    </ol>
+    <div class="nav">
+      <button class="primary" onclick="nextStep(2)">Start</button>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="step" id="step2">
+    <p>Adjust your hand and reference object in view. Click <b>Capture</b> when ready.</p>
+    <video id="video" autoplay playsinline style="display:none"></video>
+    <canvas id="output" width="640" height="480"></canvas>
+    <div class="nav">
+      <button class="secondary" onclick="nextStep(1)">Back</button>
+      <button class="primary" onclick="nextStep(3)">Capture</button>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="step" id="step3">
+    <p>Click on two points of your reference object (e.g. left and right edge of the card).</p>
+    <canvas id="calibrationCanvas" width="640" height="480"></canvas>
+    <div class="nav">
+      <button class="secondary" onclick="nextStep(2)">Back</button>
+      <button class="primary" onclick="finishCalibration()">Done</button>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="step" id="step4">
+    <p>Here are your measurements:</p>
+    <pre id="markdown"></pre>
+    <div class="nav">
+      <button class="secondary" onclick="nextStep(3)">Back</button>
+      <button class="primary" onclick="downloadFile('hand_measurements.md','md')">Download MD</button>
+      <button class="primary" onclick="downloadFile('hand_measurements.csv','csv')">Download CSV</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const videoElement = document.getElementById('video');
+  const canvasElement = document.getElementById('output');
+  const canvasCtx = canvasElement.getContext('2d');
+  const calibrationCanvas = document.getElementById('calibrationCanvas');
+  const calibCtx = calibrationCanvas.getContext('2d');
+  const mdBox = document.getElementById('markdown');
+
+  let latestLandmarks = null;
+  let snapshot = null;
+  let calibrationPoints = [];
+  let calibrationScale = 100;
+  const referenceRealLength = 85.6; // mm, card width
+
+  // Step navigation
+  function nextStep(n) {
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    document.getElementById('step'+n).classList.add('active');
+    if (n === 2) startCamera();
+    if (n === 3) showSnapshot();
+    if (n === 4) showMeasurements();
+  }
+
+  // Euclidean distance
+  function dist(a, b) {
+    return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2 + (a.z-b.z)**2);
+  }
+
+  function calcMeasurements(landmarks) {
+    const fingers = {
+      Thumb: [1,2,3,4],
+      Index: [5,6,7,8],
+      Middle: [9,10,11,12],
+      Ring: [13,14,15,16],
+      Little: [17,18,19,20],
+    };
+    let result = "# Hand Measurements (mm)\n\n";
+    let csv = "Name,Length_mm\n";
+
+    result += "## Finger lengths\n";
+    for (let [name, ids] of Object.entries(fingers)) {
+      let len=0;
+      for (let i=0;i<ids.length-1;i++) len+=dist(landmarks[ids[i]], landmarks[ids[i+1]]);
+      let val=(len*calibrationScale).toFixed(1);
+      result+=`- ${name}: ${val} mm\n`;
+      csv+=`${name},${val}\n`;
+    }
+
+    result+="\n## Phalanges\n";
+    for (let [name, ids] of Object.entries(fingers)) {
+      for (let i=0;i<ids.length-1;i++) {
+        let d=dist(landmarks[ids[i]],landmarks[ids[i+1]]);
+        let val=(d*calibrationScale).toFixed(1);
+        result+=`- ${name} P${i+1}: ${val} mm\n`;
+        csv+=`${name} P${i+1},${val}\n`;
+      }
+    }
+
+    result+="\n## Knuckles distances\n";
+    const mcp=[5,9,13,17];
+    for (let i=0;i<mcp.length-1;i++) {
+      let d=dist(landmarks[mcp[i]],landmarks[mcp[i+1]]);
+      let val=(d*calibrationScale).toFixed(1);
+      result+=`- MCP${i+1}–MCP${i+2}: ${val} mm\n`;
+      csv+=`MCP${i+1}-${i+2},${val}\n`;
+    }
+    return {md:result, csv};
+  }
+
+  function showMeasurements() {
+    const {md} = calcMeasurements(latestLandmarks);
+    mdBox.textContent=md;
+  }
+
+  function downloadFile(name,type) {
+    const {md,csv} = calcMeasurements(latestLandmarks);
+    let blob = new Blob([type==="md"?md:csv], {type:"text/plain"});
+    let a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=name;
+    a.click();
+  }
+
+  function startCamera() {
+    const camera = new Camera(videoElement, {
+      onFrame: async () => { await hands.send({image: videoElement}); },
+      width: 640, height: 480
+    });
+    camera.start();
+  }
+
+  function showSnapshot() {
+    snapshot = canvasElement.toDataURL("image/png");
+    let img = new Image();
+    img.onload=()=>{ calibCtx.drawImage(img,0,0,640,480); };
+    img.src=snapshot;
+  }
+
+  calibrationCanvas.addEventListener("click", e=>{
+    if (calibrationPoints.length<2) {
+      const rect=calibrationCanvas.getBoundingClientRect();
+      calibrationPoints.push({x:(e.clientX-rect.left)/640,y:(e.clientY-rect.top)/480,z:0});
+      calibCtx.fillStyle="red"; calibCtx.beginPath();
+      calibCtx.arc(e.clientX-rect.left,e.clientY-rect.top,5,0,2*Math.PI); calibCtx.fill();
+    }
+  });
+
+  function finishCalibration() {
+    if (calibrationPoints.length===2) {
+      let pxDist=dist(calibrationPoints[0],calibrationPoints[1]);
+      calibrationScale=referenceRealLength/pxDist;
+    }
+    nextStep(4);
+  }
+
+  const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  hands.setOptions({maxNumHands:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+  hands.onResults(results=>{
+    canvasCtx.clearRect(0,0,640,480);
+    canvasCtx.drawImage(results.image,0,0,640,480);
+    if (results.multiHandLandmarks?.length>0){
+      latestLandmarks=results.multiHandLandmarks[0];
+      drawConnectors(canvasCtx, latestLandmarks, HAND_CONNECTIONS,{color:'#0f0'});
+      drawLandmarks(canvasCtx, latestLandmarks,{color:'#f00'});
+    }
+  });
+</script>
+</body>
+</html>
