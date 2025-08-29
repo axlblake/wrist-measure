@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Hand Measurement Wizard (Stable)</title>
+  <title>Hand Wizard (based on official demo)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
   <style>
     body { font-family: Arial, sans-serif; background:#f4f6f9; margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh; }
@@ -31,11 +31,11 @@
     </div>
   </div>
 
-  <!-- Step 2 -->
+  <!-- Step 2 (OFFICIAL DEMO UNCHANGED) -->
   <div class="step" id="step2">
     <div class="video-container">
       <video id="video" autoplay muted playsinline width="640" height="480"></video>
-      <canvas id="canvas" width="640" height="480"></canvas>
+      <canvas id="output" width="640" height="480"></canvas>
     </div>
     <div class="nav">
       <button class="secondary" onclick="nextStep(1)">Back</button>
@@ -45,23 +45,27 @@
 
   <!-- Step 3 -->
   <div class="step" id="step3">
-    <p>Measurements:</p>
+    <p>Measurements (just pixel distances for now):</p>
     <pre id="markdown"></pre>
     <div class="nav">
       <button class="secondary" onclick="nextStep(2)">Back</button>
-      <button class="primary" onclick="download()">Download</button>
     </div>
   </div>
 </div>
 
 <script>
-let handLandmarker, drawingUtils, latestLandmarks=null;
-
+// === Wizard nav ===
 function nextStep(n){
   document.querySelectorAll('.step').forEach(s=>s.classList.remove('active'));
   document.getElementById('step'+n).classList.add('active');
   if(n===2) startCamera();
 }
+
+// === Official CodePen demo logic ===
+const video = document.getElementById("video");
+const canvas = document.getElementById("output");
+const ctx = canvas.getContext("2d");
+let handLandmarker, drawingUtils, latestLandmarks=null;
 
 async function init(){
   const vision = await FilesetResolver.forVisionTasks(
@@ -71,13 +75,9 @@ async function init(){
     baseOptions: { modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task" },
     runningMode: "VIDEO", numHands: 1
   });
-  drawingUtils = new DrawingUtils(document.getElementById("canvas").getContext("2d"));
+  drawingUtils = new DrawingUtils(ctx);
 }
 init();
-
-const video=document.getElementById("video");
-const canvas=document.getElementById("canvas");
-const ctx=canvas.getContext("2d");
 
 async function startCamera(){
   const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
@@ -89,7 +89,6 @@ async function loop(){
   if(video.readyState===4 && handLandmarker){
     const now=performance.now();
     const result=await handLandmarker.detectForVideo(video,now);
-    ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
     if(result.landmarks){
       latestLandmarks=result.landmarks[0];
@@ -100,28 +99,15 @@ async function loop(){
   requestAnimationFrame(loop);
 }
 
+// === Step 3 simple measurements ===
 function capture(){
   if(!latestLandmarks){ alert("No hand detected!"); return; }
-  const fingers={Thumb:[1,2,3,4],Index:[5,6,7,8],Middle:[9,10,11,12],Ring:[13,14,15,16],Little:[17,18,19,20]};
-  let md="# Hand Measurements (pixel units)\n\n";
-  for(let [name,ids] of Object.entries(fingers)){
-    let len=0;
-    for(let i=0;i<ids.length-1;i++) len+=dist(latestLandmarks[ids[i]],latestLandmarks[ids[i+1]]);
-    md+=`- ${name}: ${len.toFixed(1)} px\n`;
-  }
+  const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+  let md="# Finger tip distances (pixels)\n\n";
+  const tips=[4,8,12,16,20];
+  tips.forEach((id,i)=>{ md+=`Finger ${i+1}: ${(dist(latestLandmarks[0],latestLandmarks[id])*1000).toFixed(1)} px\n`; });
   document.getElementById("markdown").textContent=md;
   nextStep(3);
-}
-
-function dist(a,b){
-  const dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx+dy*dy);
-}
-
-function download(){
-  const text=document.getElementById("markdown").textContent;
-  const blob=new Blob([text],{type:"text/plain"});
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob); a.download="hand_measurements.md"; a.click();
 }
 </script>
 </body>
