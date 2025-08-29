@@ -2,85 +2,97 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Hand Measurement Test (Auto-size)</title>
+  <title>Hand Debug with Logs</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <style>
-    body { display:flex; justify-content:center; align-items:center; height:100vh; margin:0; background:#f4f6f9; }
+    body { display:flex; flex-direction:column; align-items:center; background:#f4f6f9; margin:0; }
     .video-container { position:relative; }
     video, canvas { position:absolute; top:0; left:0; }
-    #overlay { pointer-events:none; }
+    #log {
+      white-space:pre-wrap;
+      font-size:16px;
+      background:#111;
+      color:#0f0;
+      padding:10px;
+      margin-top:500px;
+      width:95%;
+      max-width:640px;
+      height:200px;
+      overflow:auto;
+      border-radius:6px;
+    }
+    button { margin:10px; padding:10px 20px; font-size:16px; }
   </style>
 </head>
 <body>
+  <h3>Hand Debug</h3>
+  <button onclick="switchCamera()">Switch Camera</button>
   <div class="video-container" id="container">
     <video id="video" autoplay muted playsinline></video>
     <canvas id="skeleton"></canvas>
-    <canvas id="overlay"></canvas>
   </div>
+  <div id="log">Logs will appear here...</div>
 
 <script>
 const video=document.getElementById("video");
 const skeleton=document.getElementById("skeleton");
-const skeletonCtx=skeleton.getContext("2d");
-const overlay=document.getElementById("overlay");
-const overlayCtx=overlay.getContext("2d");
+const ctx=skeleton.getContext("2d");
+const logBox=document.getElementById("log");
+
+let useUserCamera=true;
+
+function log(msg){
+  logBox.textContent += msg + "\n";
+  logBox.scrollTop=logBox.scrollHeight;
+}
 
 async function startCamera(){
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    const facing=useUserCamera ? "user" : "environment";
+    log("Starting camera: "+facing);
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:640,height:480}});
     video.srcObject=stream;
     video.onloadedmetadata=()=>{
-      resizeCanvases();
+      skeleton.width=video.videoWidth;
+      skeleton.height=video.videoHeight;
+      video.width=video.videoWidth;
+      video.height=video.videoHeight;
+      document.getElementById("container").style.width=video.videoWidth+"px";
+      document.getElementById("container").style.height=video.videoHeight+"px";
       video.play();
+      log("Camera started at "+video.videoWidth+"x"+video.videoHeight);
       requestAnimationFrame(loop);
-      drawOverlay();
     };
-  }catch(e){ alert("Camera error: "+e); }
+  }catch(e){ log("Camera error: "+e); }
 }
 
-function resizeCanvases(){
-  const w=video.videoWidth;
-  const h=video.videoHeight;
-  [skeleton,overlay].forEach(c=>{ c.width=w; c.height=h; });
-  document.getElementById("container").style.width=w+"px";
-  document.getElementById("container").style.height=h+"px";
-}
-
-// Draw placement guides relative to actual size
-function drawOverlay(){
-  overlayCtx.clearRect(0,0,overlay.width,overlay.height);
-  overlayCtx.strokeStyle="rgba(255,0,0,0.7)";
-  overlayCtx.lineWidth=3;
-  // Card rectangle: bottom right
-  let rw=overlay.width*0.22, rh=overlay.height*0.18;
-  overlayCtx.strokeRect(overlay.width-rw-20, overlay.height-rh-20, rw, rh);
-  overlayCtx.fillStyle="rgba(255,0,0,0.1)";
-  overlayCtx.fillRect(overlay.width-rw-20, overlay.height-rh-20, rw, rh);
-  // Hand circle: left-center
-  overlayCtx.beginPath();
-  overlayCtx.arc(overlay.width*0.3, overlay.height*0.5, overlay.width*0.2, 0, 2*Math.PI);
-  overlayCtx.strokeStyle="rgba(0,0,255,0.7)";
-  overlayCtx.stroke();
-  overlayCtx.fillStyle="rgba(0,0,255,0.1)";
-  overlayCtx.fill();
+function switchCamera(){
+  useUserCamera=!useUserCamera;
+  startCamera();
 }
 
 const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-hands.setOptions({maxNumHands:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+hands.setOptions({maxNumHands:1,minDetectionConfidence:0.6,minTrackingConfidence:0.6});
 hands.onResults(results=>{
-  skeletonCtx.clearRect(0,0,skeleton.width,skeleton.height);
+  ctx.clearRect(0,0,skeleton.width,skeleton.height);
+  ctx.drawImage(results.image,0,0,skeleton.width,skeleton.height);
   if(results.multiHandLandmarks?.length>0){
+    log("Hand detected ✅ with "+results.multiHandLandmarks[0].length+" landmarks");
     for(const lm of results.multiHandLandmarks){
-      drawConnectors(skeletonCtx,lm,HAND_CONNECTIONS,{color:'#0f0'});
-      drawLandmarks(skeletonCtx,lm,{color:'#f00'});
+      drawConnectors(ctx,lm,HAND_CONNECTIONS,{color:'#0f0'});
+      drawLandmarks(ctx,lm,{color:'#f00'});
     }
+  }else{
+    log("No hand detected ❌");
   }
 });
 
 async function loop(){
   if(video.readyState===4){
-    await hands.send({image:video});
+    try{
+      await hands.send({image:video});
+    }catch(e){ log("Hands.send error: "+e); }
   }
   requestAnimationFrame(loop);
 }
