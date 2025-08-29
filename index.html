@@ -1,63 +1,161 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Mediapipe Hand Demo</title>
+  <meta charset="UTF-8" />
+  <title>Mediapipe HandLandmarker – minimal, stable</title>
+  <!-- Official bundle from docs (UMD, exposes globals) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
   <style>
-    body { display:flex; justify-content:center; }
-    video, canvas { position:absolute; top:0; left:0; }
-    .container { position:relative; width:640px; height:480px; }
+    html, body { margin:0; padding:0; background:#0a0a0a; color:#eaeaea; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap { display:flex; flex-direction:column; align-items:center; gap:12px; padding:16px; }
+    .stage { position:relative; width:min(96vw, 640px); }
+    video, canvas { width:100%; height:auto; display:block; border:1px solid #333; border-radius:8px; }
+    .status { width:min(96vw, 640px); background:#111; border:1px solid #333; border-radius:8px; padding:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; max-height:220px; overflow:auto; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    button { background:#2a2a2a; color:#eaeaea; border:1px solid #444; padding:8px 12px; border-radius:8px; cursor:pointer; }
+    button:hover { background:#333; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <video id="video" autoplay muted playsinline></video>
-    <canvas id="output"></canvas>
+  <div class="wrap">
+    <div class="row">
+      <button id="rearBtn">Rear camera</button>
+      <button id="frontBtn">Front camera</button>
+      <button id="stopBtn">Stop</button>
+    </div>
+
+    <div class="stage">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="status" class="status">status: booting…</div>
   </div>
+
   <script>
-    const video=document.getElementById("video");
-    const canvas=document.getElementById("output");
-    const ctx=canvas.getContext("2d");
-    let handLandmarker, drawingUtils;
+    // ---------- On-page logger ----------
+    const statusBox = document.getElementById('status');
+    function log(msg) {
+      const t = new Date().toISOString().split('T')[1].replace('Z','');
+      statusBox.textContent += `\n[${t}] ${msg}`;
+      statusBox.scrollTop = statusBox.scrollHeight;
+    }
+    statusBox.textContent = "status: page loaded";
 
-    async function init(){
-      const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm");
+    // ---------- DOM refs ----------
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: false });
+
+    let currentStream = null;
+    let handLandmarker = null;
+    let drawingUtils = null;
+    let running = false;
+
+    // ---------- Hard fail guards ----------
+    window.addEventListener('error', e => log('window error: ' + e.message));
+    window.addEventListener('unhandledrejection', e => log('unhandledrejection: ' + (e.reason?.message || e.reason)));
+
+    // ---------- Init (exactly as in docs, plus logs) ----------
+    async function initModel() {
+      if (typeof FilesetResolver === 'undefined' || typeof HandLandmarker === 'undefined') {
+        log('❌ Bundle not loaded. Check <script src=".../vision_bundle.js">');
+        return;
+      }
+      log('Loading WASM & model…');
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+      );
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath:"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task" },
-        runningMode:"VIDEO", numHands:1
+        baseOptions: {
+          modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task"
+        },
+        runningMode: "VIDEO",
+        numHands: 1
       });
-      drawingUtils=new DrawingUtils(ctx);
-      startCamera();
+      drawingUtils = new DrawingUtils(ctx);
+      log('✅ Model ready');
     }
 
-    async function startCamera(){
-      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
-      video.srcObject=stream;
-      video.onloadedmetadata=()=>{
-        canvas.width=video.videoWidth;
-        canvas.height=video.videoHeight;
-        video.play();
+    // ---------- Camera control ----------
+    async function startCamera(facingMode = 'environment') {
+      try {
+        stopCamera();
+        log(`Requesting camera: ${facingMode}`);
+        currentStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode }
+        });
+        video.srcObject = currentStream;
+        await new Promise(res => video.onloadedmetadata = res);
+        await video.play();
+
+        // Match canvas to the *actual* video size
+        canvas.width  = video.videoWidth  || 640;
+        canvas.height = video.videoHeight || 480;
+        log(`🎥 Camera started: ${canvas.width}×${canvas.height}`);
+
+        running = true;
         requestAnimationFrame(loop);
-      };
+      } catch (err) {
+        log('❌ Camera error: ' + err);
+      }
     }
 
-    async function loop(){
-      if(video.readyState===4 && handLandmarker){
-        const now=performance.now();
-        const result=await handLandmarker.detectForVideo(video, now);
-        ctx.drawImage(video,0,0,canvas.width,canvas.height);
-        if(result.landmarks){
-          for(const lm of result.landmarks){
-            drawingUtils.drawLandmarks(lm,{color:"red",radius:3});
-            drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS,{color:"lime",lineWidth:2});
+    function stopCamera() {
+      running = false;
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+        currentStream = null;
+        log('🛑 Camera stopped');
+      }
+    }
+
+    // ---------- Detection loop (as in CodePen) ----------
+    async function loop() {
+      if (!running || !handLandmarker) return;
+      if (video.readyState === 4) {
+        const ts = performance.now();
+        let result = null;
+        try {
+          result = await handLandmarker.detectForVideo(video, ts);
+        } catch (e) {
+          log('❌ detectForVideo error: ' + e);
+          running = false;
+          return;
+        }
+
+        // Draw video frame
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Draw landmarks + connectors (if any)
+        if (result && Array.isArray(result.landmarks) && result.landmarks.length) {
+          const lm = result.landmarks[0];
+          drawingUtils.drawLandmarks(lm, { color: "red", radius: 3 });
+          // In Tasks API, connections constant is on HandLandmarker
+          if (HandLandmarker.HAND_CONNECTIONS) {
+            drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS, { color: "lime", lineWidth: 2 });
           }
         }
       }
       requestAnimationFrame(loop);
     }
 
-    init();
+    // ---------- UI buttons ----------
+    document.getElementById('rearBtn').addEventListener('click', () => startCamera('environment'));
+    document.getElementById('frontBtn').addEventListener('click', () => startCamera('user'));
+    document.getElementById('stopBtn').addEventListener('click', () => stopCamera());
+
+    // ---------- Boot ----------
+    (async () => {
+      try {
+        await initModel();
+        // start with rear camera by default
+        await startCamera('environment');
+      } catch (e) {
+        log('❌ Init error: ' + e);
+      }
+    })();
   </script>
 </body>
 </html>
