@@ -1,114 +1,63 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8">
-  <title>Hand Wizard (based on official demo)</title>
+  <title>Mediapipe Hand Demo</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
   <style>
-    body { font-family: Arial, sans-serif; background:#f4f6f9; margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh; }
-    #app { width:820px; background:white; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.1); padding:20px 40px; }
-    h2 { text-align:center; }
-    .step { display:none; }
-    .active { display:block; }
-    .nav { text-align:center; margin-top:20px; }
-    button { padding:10px 20px; margin:5px; border:none; border-radius:5px; cursor:pointer; }
-    button.primary { background:#007bff; color:white; }
-    button.secondary { background:#6c757d; color:white; }
-    .video-container { position:relative; width:640px; height:480px; margin:0 auto; }
+    body { display:flex; justify-content:center; }
     video, canvas { position:absolute; top:0; left:0; }
-    pre { background:#f1f1f1; padding:10px; border-radius:5px; overflow-x:auto; }
+    .container { position:relative; width:640px; height:480px; }
   </style>
 </head>
 <body>
-<div id="app">
-  <h2>Hand Measurement Wizard</h2>
-
-  <!-- Step 1 -->
-  <div class="step active" id="step1">
-    <p>Welcome! Place your hand flat in front of the camera with a reference card.</p>
-    <div class="nav">
-      <button class="primary" onclick="nextStep(2)">Start</button>
-    </div>
+  <div class="container">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="output"></canvas>
   </div>
+  <script>
+    const video=document.getElementById("video");
+    const canvas=document.getElementById("output");
+    const ctx=canvas.getContext("2d");
+    let handLandmarker, drawingUtils;
 
-  <!-- Step 2 (OFFICIAL DEMO UNCHANGED) -->
-  <div class="step" id="step2">
-    <div class="video-container">
-      <video id="video" autoplay muted playsinline width="640" height="480"></video>
-      <canvas id="output" width="640" height="480"></canvas>
-    </div>
-    <div class="nav">
-      <button class="secondary" onclick="nextStep(1)">Back</button>
-      <button class="primary" onclick="capture()">Capture</button>
-    </div>
-  </div>
-
-  <!-- Step 3 -->
-  <div class="step" id="step3">
-    <p>Measurements (just pixel distances for now):</p>
-    <pre id="markdown"></pre>
-    <div class="nav">
-      <button class="secondary" onclick="nextStep(2)">Back</button>
-    </div>
-  </div>
-</div>
-
-<script>
-// === Wizard nav ===
-function nextStep(n){
-  document.querySelectorAll('.step').forEach(s=>s.classList.remove('active'));
-  document.getElementById('step'+n).classList.add('active');
-  if(n===2) startCamera();
-}
-
-// === Official CodePen demo logic ===
-const video = document.getElementById("video");
-const canvas = document.getElementById("output");
-const ctx = canvas.getContext("2d");
-let handLandmarker, drawingUtils, latestLandmarks=null;
-
-async function init(){
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
-  );
-  handLandmarker = await HandLandmarker.createFromOptions(vision, {
-    baseOptions: { modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task" },
-    runningMode: "VIDEO", numHands: 1
-  });
-  drawingUtils = new DrawingUtils(ctx);
-}
-init();
-
-async function startCamera(){
-  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
-  video.srcObject=stream;
-  video.onloadedmetadata=()=>{ video.play(); requestAnimationFrame(loop); };
-}
-
-async function loop(){
-  if(video.readyState===4 && handLandmarker){
-    const now=performance.now();
-    const result=await handLandmarker.detectForVideo(video,now);
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    if(result.landmarks){
-      latestLandmarks=result.landmarks[0];
-      drawingUtils.drawLandmarks(latestLandmarks,{color:"red",radius:3});
-      drawingUtils.drawConnectors(latestLandmarks, HandLandmarker.HAND_CONNECTIONS,{color:"lime",lineWidth:2});
+    async function init(){
+      const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm");
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath:"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task" },
+        runningMode:"VIDEO", numHands:1
+      });
+      drawingUtils=new DrawingUtils(ctx);
+      startCamera();
     }
-  }
-  requestAnimationFrame(loop);
-}
 
-// === Step 3 simple measurements ===
-function capture(){
-  if(!latestLandmarks){ alert("No hand detected!"); return; }
-  const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-  let md="# Finger tip distances (pixels)\n\n";
-  const tips=[4,8,12,16,20];
-  tips.forEach((id,i)=>{ md+=`Finger ${i+1}: ${(dist(latestLandmarks[0],latestLandmarks[id])*1000).toFixed(1)} px\n`; });
-  document.getElementById("markdown").textContent=md;
-  nextStep(3);
-}
-</script>
+    async function startCamera(){
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+      video.srcObject=stream;
+      video.onloadedmetadata=()=>{
+        canvas.width=video.videoWidth;
+        canvas.height=video.videoHeight;
+        video.play();
+        requestAnimationFrame(loop);
+      };
+    }
+
+    async function loop(){
+      if(video.readyState===4 && handLandmarker){
+        const now=performance.now();
+        const result=await handLandmarker.detectForVideo(video, now);
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        if(result.landmarks){
+          for(const lm of result.landmarks){
+            drawingUtils.drawLandmarks(lm,{color:"red",radius:3});
+            drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS,{color:"lime",lineWidth:2});
+          }
+        }
+      }
+      requestAnimationFrame(loop);
+    }
+
+    init();
+  </script>
 </body>
 </html>
