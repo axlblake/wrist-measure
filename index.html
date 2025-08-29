@@ -2,21 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Hand Measurement Wizard (Fixed)</title>
+  <title>Hand Measurement Test (Auto-size)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <style>
     body { display:flex; justify-content:center; align-items:center; height:100vh; margin:0; background:#f4f6f9; }
-    .video-container { position:relative; width:640px; height:480px; }
+    .video-container { position:relative; }
     video, canvas { position:absolute; top:0; left:0; }
     #overlay { pointer-events:none; }
   </style>
 </head>
 <body>
-  <div class="video-container">
-    <video id="video" autoplay muted playsinline width="640" height="480"></video>
-    <canvas id="skeleton" width="640" height="480"></canvas>
-    <canvas id="overlay" width="640" height="480"></canvas>
+  <div class="video-container" id="container">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="skeleton"></canvas>
+    <canvas id="overlay"></canvas>
   </div>
 
 <script>
@@ -28,24 +28,36 @@ const overlayCtx=overlay.getContext("2d");
 
 async function startCamera(){
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:640,height:480}});
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
     video.srcObject=stream;
-    video.onloadedmetadata=()=>{ video.play(); requestAnimationFrame(loop); drawOverlay(); };
+    video.onloadedmetadata=()=>{
+      resizeCanvases();
+      video.play();
+      requestAnimationFrame(loop);
+      drawOverlay();
+    };
   }catch(e){ alert("Camera error: "+e); }
 }
 
-// Draw placement guides (relative to canvas size)
+function resizeCanvases(){
+  const w=video.videoWidth;
+  const h=video.videoHeight;
+  [skeleton,overlay].forEach(c=>{ c.width=w; c.height=h; });
+  document.getElementById("container").style.width=w+"px";
+  document.getElementById("container").style.height=h+"px";
+}
+
+// Draw placement guides relative to actual size
 function drawOverlay(){
   overlayCtx.clearRect(0,0,overlay.width,overlay.height);
   overlayCtx.strokeStyle="rgba(255,0,0,0.7)";
   overlayCtx.lineWidth=3;
-  // Reference card rectangle: bottom right, 25% width × 15% height
+  // Card rectangle: bottom right
   let rw=overlay.width*0.22, rh=overlay.height*0.18;
   overlayCtx.strokeRect(overlay.width-rw-20, overlay.height-rh-20, rw, rh);
   overlayCtx.fillStyle="rgba(255,0,0,0.1)";
   overlayCtx.fillRect(overlay.width-rw-20, overlay.height-rh-20, rw, rh);
-
-  // Hand circle: left-center, 25% of width
+  // Hand circle: left-center
   overlayCtx.beginPath();
   overlayCtx.arc(overlay.width*0.3, overlay.height*0.5, overlay.width*0.2, 0, 2*Math.PI);
   overlayCtx.strokeStyle="rgba(0,0,255,0.7)";
@@ -58,7 +70,6 @@ const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/ha
 hands.setOptions({maxNumHands:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
 hands.onResults(results=>{
   skeletonCtx.clearRect(0,0,skeleton.width,skeleton.height);
-  skeletonCtx.drawImage(results.image,0,0,skeleton.width,skeleton.height);
   if(results.multiHandLandmarks?.length>0){
     for(const lm of results.multiHandLandmarks){
       drawConnectors(skeletonCtx,lm,HAND_CONNECTIONS,{color:'#0f0'});
