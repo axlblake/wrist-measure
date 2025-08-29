@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HandLandmarker Demo (Fixed)</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0"></script>
+  <title>HandLandmarker Demo (Fixed API)</title>
+  <!-- ✅ Correct CDN include -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
   <style>
     body { display:flex; flex-direction:column; align-items:center; margin:0; background:#f4f6f9; }
     video, canvas { border:1px solid #ccc; }
@@ -20,10 +21,12 @@
       overflow:auto;
       border-radius:6px;
     }
+    button { margin:10px; padding:10px 20px; font-size:16px; }
   </style>
 </head>
 <body>
   <h3>HandLandmarker (MediaPipe Tasks Vision)</h3>
+  <button onclick="switchCamera()">Switch Camera</button>
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
   <div id="log">Logs will appear here...</div>
@@ -37,20 +40,21 @@ const logBox=document.getElementById("log");
 function log(msg){ logBox.textContent+=msg+"\n"; logBox.scrollTop=logBox.scrollHeight; }
 
 let handLandmarker=null;
+let useUserCamera=true;
 
 async function init(){
-  log("Loading MediaPipe HandLandmarker...");
+  log("Loading HandLandmarker...");
   try {
-    const vision=await window.FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+    const vision = await window.Vision.FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
     );
 
-    handLandmarker=await window.HandLandmarker.createFromOptions(vision,{
-      baseOptions:{
-        modelAssetPath:"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/hand_landmarker.task"
+    handLandmarker = await window.Vision.HandLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task"
       },
-      runningMode:"VIDEO",
-      numHands:1
+      runningMode: "VIDEO",
+      numHands: 1
     });
 
     log("HandLandmarker ready ✅");
@@ -61,8 +65,9 @@ async function init(){
 }
 
 async function startCamera(){
-  try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}});
+  try {
+    const facing=useUserCamera ? "user" : "environment";
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing}});
     video.srcObject=stream;
     video.onloadedmetadata=()=>{
       video.play();
@@ -71,13 +76,20 @@ async function startCamera(){
       log("Camera started at "+video.videoWidth+"x"+video.videoHeight);
       requestAnimationFrame(loop);
     };
-  }catch(e){ log("Camera error: "+e); }
+  } catch (e) {
+    log("Camera error: "+e);
+  }
+}
+
+function switchCamera(){
+  useUserCamera=!useUserCamera;
+  startCamera();
 }
 
 async function loop(){
   if(video.readyState===4 && handLandmarker){
     const now=performance.now();
-    const result=await handLandmarker.detectForVideo(video,now);
+    const result=await handLandmarker.detectForVideo(video, now);
     ctx.drawImage(video,0,0,canvas.width,canvas.height);
     if(result.landmarks && result.landmarks.length>0){
       log("Detected "+result.landmarks.length+" hand(s)");
