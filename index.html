@@ -2,43 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Hand Measurement Wizard</title>
-  <!-- ✅ Official stable bundle -->
+  <title>Hand Measurement Wizard (Stable)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f4f6f9;
-      margin: 0; padding: 0;
-      display: flex; justify-content: center; align-items: center;
-      min-height: 100vh;
-    }
-    #app {
-      width: 820px;
-      background: white;
-      border-radius: 10px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-      padding: 20px 40px;
-    }
-    h2 { text-align: center; margin-bottom: 20px; }
-    .step { display: none; }
-    .active { display: block; }
-    .nav { text-align: center; margin-top: 20px; }
-    button {
-      padding: 10px 20px; margin: 5px;
-      border: none; border-radius: 5px;
-      cursor: pointer; font-size: 16px;
-    }
-    button.primary { background: #007bff; color: white; }
-    button.secondary { background: #6c757d; color: white; }
-    .video-container { position: relative; width: 640px; height: 480px; margin: 0 auto; }
-    video, canvas { position: absolute; top: 0; left: 0; }
-    #overlay { pointer-events: none; }
-    pre {
-      background: #f1f1f1;
-      padding: 10px; border-radius: 5px;
-      overflow-x: auto; max-height: 300px;
-    }
+    body { font-family: Arial, sans-serif; background:#f4f6f9; margin:0; display:flex; justify-content:center; align-items:center; min-height:100vh; }
+    #app { width:820px; background:white; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.1); padding:20px 40px; }
+    h2 { text-align:center; }
+    .step { display:none; }
+    .active { display:block; }
+    .nav { text-align:center; margin-top:20px; }
+    button { padding:10px 20px; margin:5px; border:none; border-radius:5px; cursor:pointer; }
+    button.primary { background:#007bff; color:white; }
+    button.secondary { background:#6c757d; color:white; }
+    .video-container { position:relative; width:640px; height:480px; margin:0 auto; }
+    video, canvas { position:absolute; top:0; left:0; }
+    pre { background:#f1f1f1; padding:10px; border-radius:5px; overflow-x:auto; }
   </style>
 </head>
 <body>
@@ -47,12 +25,7 @@
 
   <!-- Step 1 -->
   <div class="step active" id="step1">
-    <p>Welcome! This wizard will measure your hand and fingers.</p>
-    <ol>
-      <li>Place your <b>hand flat</b> in front of the camera.</li>
-      <li>Place a <b>reference card</b> (e.g. credit card) in view.</li>
-      <li>Ensure good lighting.</li>
-    </ol>
+    <p>Welcome! Place your hand flat in front of the camera with a reference card.</p>
     <div class="nav">
       <button class="primary" onclick="nextStep(2)">Start</button>
     </div>
@@ -60,93 +33,64 @@
 
   <!-- Step 2 -->
   <div class="step" id="step2">
-    <p>Align your hand and reference card, then click <b>Capture</b>.</p>
     <div class="video-container">
       <video id="video" autoplay muted playsinline width="640" height="480"></video>
-      <canvas id="output" width="640" height="480"></canvas>
-      <canvas id="overlay" width="640" height="480"></canvas>
+      <canvas id="canvas" width="640" height="480"></canvas>
     </div>
     <div class="nav">
       <button class="secondary" onclick="nextStep(1)">Back</button>
-      <button class="primary" onclick="nextStep(3)">Capture</button>
+      <button class="primary" onclick="capture()">Capture</button>
     </div>
   </div>
 
   <!-- Step 3 -->
   <div class="step" id="step3">
-    <p>Click on two points on the reference card (e.g. left and right edge).</p>
-    <canvas id="calibrationCanvas" width="640" height="480"></canvas>
-    <div class="nav">
-      <button class="secondary" onclick="nextStep(2)">Back</button>
-      <button class="primary" onclick="finishCalibration()">Done</button>
-    </div>
-  </div>
-
-  <!-- Step 4 -->
-  <div class="step" id="step4">
-    <p>Your measurements:</p>
+    <p>Measurements:</p>
     <pre id="markdown"></pre>
     <div class="nav">
-      <button class="secondary" onclick="nextStep(3)">Back</button>
-      <button class="primary" onclick="downloadFile('hand_measurements.md','md')">Download MD</button>
-      <button class="primary" onclick="downloadFile('hand_measurements.csv','csv')">Download CSV</button>
+      <button class="secondary" onclick="nextStep(2)">Back</button>
+      <button class="primary" onclick="download()">Download</button>
     </div>
   </div>
 </div>
 
 <script>
-let handLandmarker, drawingUtils;
-let latestLandmarks=null;
-let calibrationPoints=[];
-let calibrationScale=1;
-const referenceRealLength=85.6; // mm (credit card width)
+let handLandmarker, drawingUtils, latestLandmarks=null;
 
-// === Wizard navigation ===
 function nextStep(n){
   document.querySelectorAll('.step').forEach(s=>s.classList.remove('active'));
   document.getElementById('step'+n).classList.add('active');
   if(n===2) startCamera();
-  if(n===3) showSnapshot();
-  if(n===4) showMeasurements();
 }
 
-// === Init model ===
 async function init(){
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
   );
   handLandmarker = await HandLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task"
-    },
-    runningMode: "VIDEO",
-    numHands: 1
+    baseOptions: { modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task" },
+    runningMode: "VIDEO", numHands: 1
   });
-  drawingUtils = new DrawingUtils(document.getElementById("output").getContext("2d"));
+  drawingUtils = new DrawingUtils(document.getElementById("canvas").getContext("2d"));
 }
 init();
 
-// === Camera loop ===
 const video=document.getElementById("video");
-const output=document.getElementById("output");
-const ctx=output.getContext("2d");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
 
 async function startCamera(){
   const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
   video.srcObject=stream;
-  video.onloadedmetadata=()=>{
-    video.play();
-    requestAnimationFrame(loop);
-    drawOverlay();
-  };
+  video.onloadedmetadata=()=>{ video.play(); requestAnimationFrame(loop); };
 }
 
 async function loop(){
   if(video.readyState===4 && handLandmarker){
     const now=performance.now();
     const result=await handLandmarker.detectForVideo(video,now);
-    ctx.clearRect(0,0,output.width,output.height);
-    ctx.drawImage(video,0,0,output.width,output.height);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
     if(result.landmarks){
       latestLandmarks=result.landmarks[0];
       drawingUtils.drawLandmarks(latestLandmarks,{color:"red",radius:3});
@@ -156,75 +100,28 @@ async function loop(){
   requestAnimationFrame(loop);
 }
 
-// === Overlay guides ===
-function drawOverlay(){
-  const overlay=document.getElementById("overlay");
-  const octx=overlay.getContext("2d");
-  octx.strokeStyle="rgba(255,0,0,0.7)";
-  octx.lineWidth=3;
-  octx.strokeRect(480,360,140,80); // card guide
-  octx.beginPath();
-  octx.arc(200,250,80,0,2*Math.PI); // hand guide
-  octx.strokeStyle="rgba(0,0,255,0.7)";
-  octx.stroke();
-}
-
-// === Snapshot for calibration ===
-function showSnapshot(){
-  const c=document.getElementById("calibrationCanvas");
-  c.getContext("2d").drawImage(video,0,0,640,480);
-}
-document.getElementById("calibrationCanvas").addEventListener("click",e=>{
-  if(calibrationPoints.length<2){
-    const rect=e.target.getBoundingClientRect();
-    calibrationPoints.push({
-      x:(e.clientX-rect.left)/640,
-      y:(e.clientY-rect.top)/480,
-      z:0
-    });
-    const ctx=e.target.getContext("2d");
-    ctx.fillStyle="red";
-    ctx.beginPath();
-    ctx.arc(e.clientX-rect.left,e.clientY-rect.top,5,0,2*Math.PI);
-    ctx.fill();
-  }
-});
-function finishCalibration(){
-  if(calibrationPoints.length===2){
-    const dx=calibrationPoints[0].x-calibrationPoints[1].x;
-    const dy=calibrationPoints[0].y-calibrationPoints[1].y;
-    const pxDist=Math.sqrt(dx*dx+dy*dy);
-    calibrationScale=referenceRealLength/pxDist;
-  }
-  nextStep(4);
-}
-
-// === Measurements ===
-function dist(a,b){
-  const dx=a.x-b.x, dy=a.y-b.y, dz=(a.z||0)-(b.z||0);
-  return Math.sqrt(dx*dx+dy*dy+dz*dz);
-}
-function calcMeasurements(lm){
-  if(!lm) return {md:"No landmarks",csv:""};
+function capture(){
+  if(!latestLandmarks){ alert("No hand detected!"); return; }
   const fingers={Thumb:[1,2,3,4],Index:[5,6,7,8],Middle:[9,10,11,12],Ring:[13,14,15,16],Little:[17,18,19,20]};
-  let md="# Hand Measurements (mm)\n\n"; let csv="Name,Length_mm\n";
+  let md="# Hand Measurements (pixel units)\n\n";
   for(let [name,ids] of Object.entries(fingers)){
     let len=0;
-    for(let i=0;i<ids.length-1;i++) len+=dist(lm[ids[i]],lm[ids[i+1]]);
-    let val=(len*calibrationScale).toFixed(1);
-    md+=`- ${name}: ${val} mm\n`; csv+=`${name},${val}\n`;
+    for(let i=0;i<ids.length-1;i++) len+=dist(latestLandmarks[ids[i]],latestLandmarks[ids[i+1]]);
+    md+=`- ${name}: ${len.toFixed(1)} px\n`;
   }
-  return {md,csv};
-}
-function showMeasurements(){
-  const {md}=calcMeasurements(latestLandmarks);
   document.getElementById("markdown").textContent=md;
+  nextStep(3);
 }
-function downloadFile(name,type){
-  const {md,csv}=calcMeasurements(latestLandmarks);
-  const blob=new Blob([type==="md"?md:csv],{type:"text/plain"});
+
+function dist(a,b){
+  const dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx+dy*dy);
+}
+
+function download(){
+  const text=document.getElementById("markdown").textContent;
+  const blob=new Blob([text],{type:"text/plain"});
   const a=document.createElement("a");
-  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  a.href=URL.createObjectURL(blob); a.download="hand_measurements.md"; a.click();
 }
 </script>
 </body>
