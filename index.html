@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HandLandmarker — MediaPipe Tasks Vision</title>
+  <title>HandLandmarker — Works on Android</title>
   <style>
     body { display:flex; flex-direction:column; align-items:center; margin:0; background:#f4f6f9; }
-    video, canvas { border:1px solid #ccc; }
+    video, canvas { border:1px solid #ccc; max-width:95vw; height:auto; }
     #log {
       margin-top:10px;
       white-space:pre-wrap;
@@ -19,75 +19,57 @@
       overflow:auto;
       border-radius:6px;
     }
-    button { margin:10px; padding:10px 20px; font-size:16px; }
   </style>
 </head>
 <body>
-  <h3>HandLandmarker (Tasks Vision)</h3>
-  <button id="switchBtn">Switch Camera</button>
+  <h3>HandLandmarker (MediaPipe Tasks Vision)</h3>
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
   <div id="log">Logs will appear here...</div>
 
 <script type="module">
-  import { HandLandmarker, FilesetResolver, DrawingUtils } 
-    from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.mjs";
+  import { HandLandmarker, FilesetResolver, DrawingUtils }
+    from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
 
   const video = document.getElementById("video");
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
   const logBox = document.getElementById("log");
-  function log(msg){ logBox.textContent+=msg+"\n"; logBox.scrollTop=logBox.scrollHeight; }
+  function log(msg){ logBox.textContent += msg + "\n"; logBox.scrollTop = logBox.scrollHeight; }
 
   let handLandmarker = null;
-  let useUserCamera = true;
   let drawingUtils = null;
 
   async function init(){
     log("Loading HandLandmarker...");
-    try {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-      );
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+    );
 
-      handLandmarker = await HandLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/hand_landmarker.task"
-        },
-        runningMode: "VIDEO",
-        numHands: 1
-      });
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task"
+      },
+      runningMode: "VIDEO",
+      numHands: 1
+    });
 
-      drawingUtils = new DrawingUtils(ctx);
-
-      log("HandLandmarker ready ✅");
-      startCamera();
-    } catch (e) {
-      log("Init error: "+e);
-    }
+    drawingUtils = new DrawingUtils(ctx);
+    log("HandLandmarker ready ✅");
+    startCamera();
   }
 
   async function startCamera(){
-    try {
-      const facing = useUserCamera ? "user" : "environment";
-      const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:facing}});
-      video.srcObject = stream;
-      video.onloadedmetadata = () => {
-        video.play();
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        log("Camera started at "+video.videoWidth+"x"+video.videoHeight);
-        requestAnimationFrame(loop);
-      };
-    } catch (e) {
-      log("Camera error: "+e);
-    }
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }});
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      video.play();
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      log("Camera started at "+video.videoWidth+"x"+video.videoHeight);
+      requestAnimationFrame(loop);
+    };
   }
-
-  document.getElementById("switchBtn").onclick = () => {
-    useUserCamera = !useUserCamera;
-    startCamera();
-  };
 
   async function loop(){
     if(video.readyState === 4 && handLandmarker){
@@ -95,11 +77,10 @@
       const result = await handLandmarker.detectForVideo(video, now);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      if(result.landmarks && result.landmarks.length>0){
+      if(result.landmarks && result.landmarks.length > 0){
         log("Detected "+result.landmarks.length+" hand(s)");
         for(const lm of result.landmarks){
-          // draw connectors + landmarks
-          drawingUtils.drawLandmarks(lm, {color:"red", radius:4});
+          drawingUtils.drawLandmarks(lm, {color:"red", radius:3});
           drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS, {color:"lime", lineWidth:2});
         }
       } else {
