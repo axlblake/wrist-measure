@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>HandLandmarker Demo (Correct API)</title>
-  <!-- ✅ Correct CDN include -->
+  <title>HandLandmarker Demo (Correct Globals)</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js"></script>
   <style>
     body { display:flex; flex-direction:column; align-items:center; margin:0; background:#f4f6f9; }
@@ -45,11 +44,11 @@ let useUserCamera=true;
 async function init(){
   log("Loading HandLandmarker...");
   try {
-    const vision = await FilesetResolver.forVisionTasks(
+    const visionFiles = await vision.FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
     );
 
-    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    handLandmarker = await vision.HandLandmarker.createFromOptions(visionFiles, {
       baseOptions: {
         modelAssetPath: "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/hand_landmarker.task"
       },
